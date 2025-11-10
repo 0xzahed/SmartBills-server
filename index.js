@@ -25,23 +25,32 @@ async function run() {
     await client.connect();
     console.log("MongoDB Connected Successfully!");
     const db = client.db("BillManagementDB");
-    const usersCollection = db.collection("users");
+    const billsCollection = db.collection("bills");
 
     app.get("/", (req, res) => {
       res.send("Bill Management Server Running...");
     });
     
-    app.post("/users", async (req, res) => {
+    app.get("/bills", async (req, res) => {
       try {
-        const user = req.body;
-        const result = await usersCollection.insertOne(user);
-        res.send(result);
+        const category = req.query.category;
+        const filter = category ? { category } : {};
+        const bills = await billsCollection.find(filter).toArray();
+        res.send(bills);
       } catch (error) {
-        res
-          .status(500)
-          .send({ error: "Failed to insert user", details: error });
+        res.status(500).send({ error: "Failed to fetch bills", details: error.message });
       }
     });
+
+     app.get("/bills/recent", async (req, res) => {
+      try {
+        const recentBills = await billsCollection.find().sort({ _id: -1 }).limit(6).toArray();
+        res.send(recentBills);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to fetch recent bills", details: error.message });
+      }
+    });
+
     app.listen(port, () => {
       console.log(` Server running on http://localhost:${port}`);
     });
