@@ -30,7 +30,7 @@ async function run() {
     app.get("/", (req, res) => {
       res.send("Bill Management Server Running...");
     });
-    
+
     app.get("/bills", async (req, res) => {
       try {
         const category = req.query.category;
@@ -38,19 +38,27 @@ async function run() {
         const bills = await billsCollection.find(filter).toArray();
         res.send(bills);
       } catch (error) {
-        res.status(500).send({ error: "Failed to fetch bills", details: error.message });
+        res
+          .status(500)
+          .send({ error: "Failed to fetch bills", details: error.message });
       }
     });
 
-     app.get("/bills/recent", async (req, res) => {
+    app.get("/bills/recent", async (req, res) => {
       try {
-        const recentBills = await billsCollection.find().sort({ _id: -1 }).limit(6).toArray();
+        const recentBills = await billsCollection
+          .find()
+          .sort({ _id: -1 })
+          .limit(6)
+          .toArray();
         res.send(recentBills);
       } catch (error) {
-        res.status(500).send({ error: "Failed to fetch recent bills", details: error.message });
+        res.status(500).send({
+          error: "Failed to fetch recent bills",
+          details: error.message,
+        });
       }
     });
-
     app.listen(port, () => {
       console.log(` Server running on http://localhost:${port}`);
     });
