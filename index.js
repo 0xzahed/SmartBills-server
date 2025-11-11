@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 
 const app = express();
@@ -26,6 +26,7 @@ async function run() {
     console.log("MongoDB Connected Successfully!");
     const db = client.db("BillManagementDB");
     const billsCollection = db.collection("bills");
+    const myBillsCollection = db.collection("myBills");
 
     app.get("/", (req, res) => {
       res.send("Bill Management Server Running...");
@@ -60,17 +61,13 @@ async function run() {
       }
     });
 
-     app.get("/bills/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const bill = await billsCollection.findOne({ _id: new ObjectId(id) });
-        if (!bill) return res.status(404).send({ message: "Bill not found" });
-        res.send(bill);
-      } catch (error) {
-        res.status(500).send({ message: "Error fetching bill details", error: error.message });
-      }
+    app.get("/bills/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await billsCollection.findOne(query);
+      res.send(result);
     });
-    
+
     app.listen(port, () => {
       console.log(` Server running on http://localhost:${port}`);
     });
