@@ -59,6 +59,18 @@ async function run() {
         });
       }
     });
+
+     app.get("/bills/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const bill = await billsCollection.findOne({ _id: new ObjectId(id) });
+        if (!bill) return res.status(404).send({ message: "Bill not found" });
+        res.send(bill);
+      } catch (error) {
+        res.status(500).send({ message: "Error fetching bill details", error: error.message });
+      }
+    });
+    
     app.listen(port, () => {
       console.log(` Server running on http://localhost:${port}`);
     });
