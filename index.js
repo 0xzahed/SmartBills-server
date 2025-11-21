@@ -1,104 +1,105 @@
+// ---------------------------------------------------
+// SMARTBILLS – FULL PRODUCTION SERVER
+// ---------------------------------------------------
+
 const express = require("express");
 const cors = require("cors");
-const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const nodemailer = require("nodemailer");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 
 const app = express();
-const port = process.env.PORT || 3000;
-
 app.use(cors());
 app.use(express.json());
 
-// ----------------------------------
-// SMTP EMAIL SENDER (Nodemailer)
-// ----------------------------------
+const port = process.env.PORT || 3000;
+
+// ---------------------------------------------------
+// SMTP CONFIG (Gmail / Resend / Mailjet)
+// ---------------------------------------------------
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT),
-  secure: process.env.SMTP_PORT == "465",
+  secure: Number(process.env.SMTP_PORT) === 465,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
 });
 
-// ----------------------------------
-// MONGODB CONNECTION
-// ----------------------------------
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@bill-mnagement-cluster.qlgquoh.mongodb.net/?retryWrites=true&w=majority`;
-
+// ---------------------------------------------------
 // SIMPLE AUTH MIDDLEWARE
+// ---------------------------------------------------
 const verifyFireBaseToken = (req, res, next) => {
   req.token_email =
-    req.body?.email || req.query?.email || req.params?.email || null;
+    req.body?.email ||
+    req.query?.email ||
+    req.params?.email ||
+    null;
+
   next();
 };
 
+// ---------------------------------------------------
+// MONGODB CONNECTION
+// ---------------------------------------------------
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@bill-mnagement-cluster.qlgquoh.mongodb.net/?retryWrites=true&w=majority`;
+
 const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  },
+  serverApi: { version: ServerApiVersion.v1 },
 });
 
+// ---------------------------------------------------
+// MAIN SERVER FUNCTION
+// ---------------------------------------------------
 async function run() {
   try {
-    console.log("Connecting to MongoDB...");
     await client.connect();
-    console.log("MongoDB Connected Successfully!");
+    console.log("MongoDB Connected ✔");
 
     const db = client.db("BillManagementDB");
 
-    // Existing Collections
-    const billsCollection = db.collection("bills");
-    const myBillsCollection = db.collection("myBills");
+    // Collections
+    const bills = db.collection("bills");
+    const myBills = db.collection("myBills");
+    const notifications = db.collection("notifications");
+    const scheduledPayments = db.collection("scheduledPayments");
+    const providers = db.collection("providers");
+    const subscriptions = db.collection("subscriptions");
 
-    // NEW COLLECTIONS (3.1 - 3.4)
-    const notificationsCollection = db.collection("notifications");
-    const scheduledPaymentsCollection = db.collection("scheduledPayments");
-
-    // NEW COLLECTIONS (Providers & Subscriptions)
-    const providersCollection = db.collection("providers");
-    const subscriptionsCollection = db.collection("subscriptions");
-
-    // -------------------------------------
+    // ---------------------------------------------------
     // ROOT
-    // -------------------------------------
+    // ---------------------------------------------------
     app.get("/", (req, res) => {
-      res.send("Bill Management Server Running...");
+      res.send("SmartBills Server Running...");
     });
 
-    // -------------------------------------
-    // PROVIDERS SYSTEM (STATIC REMOVED)
-    // -------------------------------------
-
-    // Fetch all providers from DB
+    // ---------------------------------------------------
+    // PROVIDERS
+    // ---------------------------------------------------
     app.get("/providers", async (req, res) => {
-      const providers = await providersCollection.find().toArray();
-      res.send(providers);
+      res.send(await providers.find().toArray());
     });
 
-    // Subscribe to provider
+    // ---------------------------------------------------
+    // SUBSCRIPTIONS
+    // ---------------------------------------------------
     app.post("/subscriptions", verifyFireBaseToken, async (req, res) => {
       const { email, providerId } = req.body;
 
       if (email !== req.token_email)
-        return res.status(403).send({ message: "forbidden access" });
+        return res.status(403).send({ message: "Forbidden access" });
 
-      const provider = await providersCollection.findOne({
-        _id: new ObjectId(providerId),
-      });
+      const provider = await providers.findOne({ _id: new ObjectId(providerId) });
 
       if (!provider)
         return res.status(404).send({ message: "Provider not found" });
 
-      const already = await subscriptionsCollection.findOne({ email, providerId });
-      if (already)
+      const exists = await subscriptions.findOne({ email, providerId });
+      if (exists)
         return res.send({ message: "Already subscribed", subscribed: true });
 
-      const result = await subscriptionsCollection.insertOne({
+      const result = await subscriptions.insertOne({
         email,
         providerId,
         providerName: provider.name,
@@ -109,176 +110,84 @@ async function run() {
       res.send(result);
     });
 
-    // Get my subscriptions
     app.get("/subscriptions", verifyFireBaseToken, async (req, res) => {
       const email = req.query.email;
 
       if (email !== req.token_email)
-        return res.status(403).send({ message: "forbidden access" });
+        return res.status(403).send({ message: "Forbidden access" });
 
-      const subs = await subscriptionsCollection.find({ email }).toArray();
-      res.send(subs);
+      res.send(await subscriptions.find({ email }).toArray());
     });
 
-    // -------------------------------------
-    // BILLS (Existing)
-    // -------------------------------------
+    // ---------------------------------------------------
+    // BILLS
+    // ---------------------------------------------------
     app.get("/bills", async (req, res) => {
-      try {
-        const category = req.query.category;
-        const filter = category ? { category } : {};
-        const bills = await billsCollection.find(filter).toArray();
-        res.send(bills);
-      } catch (error) {
-        res.status(500).send({
-          error: "Failed to fetch bills",
-          details: error.message,
-        });
-      }
-    });
-
-    app.get("/bills/recent", async (req, res) => {
-      try {
-        const recentBills = await billsCollection
-          .find()
-          .sort({ _id: -1 })
-          .limit(6)
-          .toArray();
-        res.send(recentBills);
-      } catch (error) {
-        res.status(500).send({
-          error: "Failed to fetch recent bills",
-          details: error.message,
-        });
-      }
+      const category = req.query.category;
+      const filter = category ? { category } : {};
+      res.send(await bills.find(filter).toArray());
     });
 
     app.get("/bills/:id", async (req, res) => {
       const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await billsCollection.findOne(query);
-      res.send(result);
+      res.send(await bills.findOne({ _id: new ObjectId(id) }));
     });
 
-    // -------------------------------------
-    // MYBILLS (Existing)
-    // -------------------------------------
+    // ---------------------------------------------------
+    // MY BILLS
+    // ---------------------------------------------------
     app.post("/mybills", verifyFireBaseToken, async (req, res) => {
-      try {
-        const billData = req.body;
+      const bill = req.body;
 
-        if (req.token_email !== billData.email) {
-          return res.status(403).send({ message: "forbidden access" });
-        }
+      if (bill.email !== req.token_email)
+        return res.status(403).send({ message: "Forbidden access" });
 
-        const result = await myBillsCollection.insertOne(billData);
-        res.status(201).send(result);
-      } catch (error) {
-        res.status(500).send({
-          error: "Failed to save user bill",
-          details: error.message,
-        });
-      }
+      res.send(await myBills.insertOne({ ...bill, createdAt: new Date() }));
     });
 
     app.get("/mybills", verifyFireBaseToken, async (req, res) => {
-      try {
-        const email = req.query.email;
+      const email = req.query.email;
 
-        if (!email) return res.status(400).send({ message: "Email required" });
-        if (email !== req.token_email)
-          return res.status(403).send({ message: "forbidden access" });
+      if (email !== req.token_email)
+        return res.status(403).send({ message: "Forbidden access" });
 
-        const myBills = await myBillsCollection.find({ email }).toArray();
-        res.send(myBills);
-      } catch (error) {
-        res.status(500).send({
-          error: "Failed to fetch user bills",
-          details: error.message,
-        });
-      }
+      res.send(await myBills.find({ email }).toArray());
     });
 
-    app.put("/mybills/:id", verifyFireBaseToken, async (req, res) => {
-      try {
-        const id = req.params.id;
-        const updatedData = req.body;
-
-        const result = await myBillsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: updatedData }
-        );
-
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({
-          error: "Failed to update bill",
-          details: error.message,
-        });
-      }
-    });
-
-    app.delete("/mybills/:id", verifyFireBaseToken, async (req, res) => {
-      try {
-        const id = req.params.id;
-
-        const result = await myBillsCollection.deleteOne({
-          _id: new ObjectId(id),
-        });
-
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({
-          error: "Failed to delete bill",
-          details: error.message,
-        });
-      }
-    });
-
-    // -------------------------------------
-    // 3.1 AI INSIGHTS
-    // -------------------------------------
+    // ---------------------------------------------------
+    // AI INSIGHTS (Placeholder)
+    // ---------------------------------------------------
     app.post("/ai/insights", verifyFireBaseToken, async (req, res) => {
-      try {
-        const { email } = req.body;
+      const { email } = req.body;
 
-        if (email !== req.token_email)
-          return res.status(403).send({ message: "forbidden access" });
+      if (email !== req.token_email)
+        return res.status(403).send({ message: "Forbidden access" });
 
-        const myBills = await myBillsCollection.find({ email }).toArray();
-        const totalAmount = myBills.reduce(
-          (sum, b) => sum + Number(b.amount),
-          0
-        );
+      const userBills = await myBills.find({ email }).toArray();
 
-        res.send({
-          summary: {
-            totalSpent: totalAmount,
-            billCount: myBills.length,
-          },
-          ai: "AI integration pending.",
-        });
-      } catch (error) {
-        res.status(500).send({ error: error.message });
-      }
+      const total = userBills.reduce((sum, b) => sum + Number(b.amount || 0), 0);
+
+      res.send({
+        summary: { totalSpent: total, billCount: userBills.length },
+        ai: "AI integration pending.",
+      });
     });
 
-    // -------------------------------------
-    // 3.2 SMART REMINDER + EMAIL
-    // -------------------------------------
+    // ---------------------------------------------------
+    // SMART REMINDERS + EMAIL SEND
+    // ---------------------------------------------------
     app.post("/notifications", verifyFireBaseToken, async (req, res) => {
       const data = req.body;
 
       if (data.email !== req.token_email)
-        return res.status(403).send({ message: "forbidden access" });
+        return res.status(403).send({ message: "Forbidden access" });
 
-      const result = await notificationsCollection.insertOne({
+      const result = await notifications.insertOne({
         ...data,
         status: "pending",
         createdAt: new Date(),
       });
 
-      // Send Email
       await transporter.sendMail({
         from: `"SmartBills" <${process.env.SMTP_USER}>`,
         to: data.email,
@@ -293,22 +202,20 @@ async function run() {
       const email = req.query.email;
 
       if (email !== req.token_email)
-        return res.status(403).send({ message: "forbidden access" });
+        return res.status(403).send({ message: "Forbidden access" });
 
-      const notifications = await notificationsCollection
-        .find({ email })
-        .toArray();
-
-      res.send(notifications);
+      res.send(await notifications.find({ email }).toArray());
     });
 
-    // Custom Email
+    // ---------------------------------------------------
+    // CUSTOM EMAIL (Manual)
+    // ---------------------------------------------------
     app.post("/send-email", verifyFireBaseToken, async (req, res) => {
       try {
         const { email, subject, message } = req.body;
 
         if (email !== req.token_email)
-          return res.status(403).send({ message: "forbidden access" });
+          return res.status(403).send({ message: "Forbidden access" });
 
         const info = await transporter.sendMail({
           from: `"SmartBills" <${process.env.SMTP_USER}>`,
@@ -323,55 +230,118 @@ async function run() {
       }
     });
 
-    // -------------------------------------
-    // 3.3 SCHEDULED PAYMENTS
-    // -------------------------------------
+    // ---------------------------------------------------
+    // PAYMENT SCHEDULE
+    // ---------------------------------------------------
     app.post("/payments/schedule", verifyFireBaseToken, async (req, res) => {
       const data = req.body;
 
       if (data.email !== req.token_email)
-        return res.status(403).send({ message: "forbidden access" });
+        return res.status(403).send({ message: "Forbidden access" });
 
-      const result = await scheduledPaymentsCollection.insertOne({
-        ...data,
-        status: "scheduled",
-        createdAt: new Date(),
-      });
-
-      res.send(result);
+      res.send(
+        await scheduledPayments.insertOne({
+          ...data,
+          status: "scheduled",
+          createdAt: new Date(),
+        })
+      );
     });
 
-    // -------------------------------------
-    // 3.4 DOCUMENT UPLOAD (OCR)
-    // -------------------------------------
+    // ---------------------------------------------------
+    // OCR IMPORT
+    // ---------------------------------------------------
     app.post("/bills/import", verifyFireBaseToken, async (req, res) => {
       const bill = req.body;
 
       if (bill.email !== req.token_email)
-        return res.status(403).send({ message: "forbidden access" });
+        return res.status(403).send({ message: "Forbidden access" });
 
-      const result = await billsCollection.insertOne({
-        ...bill,
-        status: "pending_review",
-        createdAt: new Date(),
-      });
-
-      res.send(result);
+      res.send(
+        await bills.insertOne({
+          ...bill,
+          status: "pending_review",
+          createdAt: new Date(),
+        })
+      );
     });
 
-    // -------------------------------------
+    // ---------------------------------------------------
+    // SEND INVOICE AFTER PAYMENT
+    // ---------------------------------------------------
+    app.post("/send-invoice", async (req, res) => {
+      const {
+        email,
+        username,
+        billTitle,
+        billCategory,
+        amount,
+        paymentDate,
+        billId,
+        transactionId,
+        providerName,
+        address,
+        phone,
+        cardLast4,
+      } = req.body;
+
+      try {
+        const html = `
+        <div style="max-width:600px;margin:auto;background:#fff;padding:20px;border-radius:12px;font-family:Arial;">
+          <h2 style="color:#10b981;text-align:center">SmartBills Invoice</h2>
+          <p style="text-align:center;color:#666">Payment Receipt</p>
+
+          <h3>Customer Info</h3>
+          <p><b>Name:</b> ${username}</p>
+          <p><b>Email:</b> ${email}</p>
+          <p><b>Phone:</b> ${phone}</p>
+          <p><b>Address:</b> ${address}</p>
+
+          <h3>Billing Details</h3>
+          <p><b>Provider:</b> ${providerName}</p>
+          <p><b>Title:</b> ${billTitle}</p>
+          <p><b>Category:</b> ${billCategory}</p>
+          <p><b>Bill ID:</b> ${billId}</p>
+          <p><b>Transaction ID:</b> ${transactionId}</p>
+
+          <h2 style="color:#10b981">Total: ৳${amount}</h2>
+          <p>Paid on: ${paymentDate}</p>
+          <p>Card ending in: ****${cardLast4}</p>
+
+          <hr />
+          <p style="color:#999;font-size:12px;text-align:center">Thank you for using SmartBills</p>
+        </div>
+      `;
+
+        await transporter.sendMail({
+          from: `"SmartBills" <${process.env.SMTP_USER}>`,
+          to: email,
+          subject: `Invoice for ${billTitle} – ৳${amount}`,
+          html,
+        });
+
+        res.send({ success: true });
+      } catch (err) {
+        console.error("Invoice Error:", err);
+        res.status(500).send({ error: "Failed to send invoice" });
+      }
+    });
+
+    // ---------------------------------------------------
     // HEALTH CHECK
-    // -------------------------------------
+    // ---------------------------------------------------
     app.get("/health", (req, res) => {
       res.send({ status: "ok", time: new Date() });
     });
 
+    // ---------------------------------------------------
     // START SERVER
+    // ---------------------------------------------------
     app.listen(port, () => {
-      console.log(` Server running on http://localhost:${port}`);
+      console.log(`SmartBills Server Running on Port: ${port}`);
     });
-  } catch (error) {
-    console.error("MongoDB Connection Failed:", error.message);
+  } catch (err) {
+    console.error("MongoDB Error:", err);
   }
 }
 
