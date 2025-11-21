@@ -16,7 +16,7 @@ app.use(express.json());
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT),
-  secure: process.env.SMTP_PORT == "465", // secure for Gmail
+  secure: process.env.SMTP_PORT == "465",
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
@@ -55,15 +55,69 @@ async function run() {
     const billsCollection = db.collection("bills");
     const myBillsCollection = db.collection("myBills");
 
-    // NEW COLLECTIONS (Up to 3.4)
+    // NEW COLLECTIONS (3.1 - 3.4)
     const notificationsCollection = db.collection("notifications");
     const scheduledPaymentsCollection = db.collection("scheduledPayments");
+
+    // NEW COLLECTIONS (Providers & Subscriptions)
+    const providersCollection = db.collection("providers");
+    const subscriptionsCollection = db.collection("subscriptions");
 
     // -------------------------------------
     // ROOT
     // -------------------------------------
     app.get("/", (req, res) => {
       res.send("Bill Management Server Running...");
+    });
+
+    // -------------------------------------
+    // PROVIDERS SYSTEM (STATIC REMOVED)
+    // -------------------------------------
+
+    // Fetch all providers from DB
+    app.get("/providers", async (req, res) => {
+      const providers = await providersCollection.find().toArray();
+      res.send(providers);
+    });
+
+    // Subscribe to provider
+    app.post("/subscriptions", verifyFireBaseToken, async (req, res) => {
+      const { email, providerId } = req.body;
+
+      if (email !== req.token_email)
+        return res.status(403).send({ message: "forbidden access" });
+
+      const provider = await providersCollection.findOne({
+        _id: new ObjectId(providerId),
+      });
+
+      if (!provider)
+        return res.status(404).send({ message: "Provider not found" });
+
+      const already = await subscriptionsCollection.findOne({ email, providerId });
+      if (already)
+        return res.send({ message: "Already subscribed", subscribed: true });
+
+      const result = await subscriptionsCollection.insertOne({
+        email,
+        providerId,
+        providerName: provider.name,
+        type: provider.type,
+        subscribedAt: new Date(),
+      });
+
+      res.send(result);
+    });
+
+    // Get my subscriptions
+    app.get("/subscriptions", verifyFireBaseToken, async (req, res) => {
+      const email = req.query.email;
+
+      if (email !== req.token_email)
+        return res.status(403).send({ message: "forbidden access" });
+
+      const subs = await subscriptionsCollection.find({ email }).toArray();
+      res.send(subs);
     });
 
     // -------------------------------------
@@ -130,8 +184,8 @@ async function run() {
     app.get("/mybills", verifyFireBaseToken, async (req, res) => {
       try {
         const email = req.query.email;
-        if (!email) return res.status(400).send({ message: "Email required" });
 
+        if (!email) return res.status(400).send({ message: "Email required" });
         if (email !== req.token_email)
           return res.status(403).send({ message: "forbidden access" });
 
@@ -182,7 +236,7 @@ async function run() {
     });
 
     // -------------------------------------
-    // 3.1 AI INSIGHTS (Placeholder)
+    // 3.1 AI INSIGHTS
     // -------------------------------------
     app.post("/ai/insights", verifyFireBaseToken, async (req, res) => {
       try {
@@ -210,24 +264,21 @@ async function run() {
     });
 
     // -------------------------------------
-    // 3.2 SMART REMINDER CENTER + EMAIL SEND
+    // 3.2 SMART REMINDER + EMAIL
     // -------------------------------------
-
-    // Create notification + send email
     app.post("/notifications", verifyFireBaseToken, async (req, res) => {
       const data = req.body;
 
       if (data.email !== req.token_email)
         return res.status(403).send({ message: "forbidden access" });
 
-      // Save reminder
       const result = await notificationsCollection.insertOne({
         ...data,
         status: "pending",
         createdAt: new Date(),
       });
 
-      // Auto send email (optional)
+      // Send Email
       await transporter.sendMail({
         from: `"SmartBills" <${process.env.SMTP_USER}>`,
         to: data.email,
@@ -238,7 +289,6 @@ async function run() {
       res.send(result);
     });
 
-    // Fetch notifications
     app.get("/notifications", verifyFireBaseToken, async (req, res) => {
       const email = req.query.email;
 
@@ -252,9 +302,7 @@ async function run() {
       res.send(notifications);
     });
 
-    // -------------------------------------
-    // SEND CUSTOM EMAIL (Manual)
-    // -------------------------------------
+    // Custom Email
     app.post("/send-email", verifyFireBaseToken, async (req, res) => {
       try {
         const { email, subject, message } = req.body;
@@ -294,7 +342,7 @@ async function run() {
     });
 
     // -------------------------------------
-    // 3.4 DOCUMENT UPLOAD & OCR INTAKE
+    // 3.4 DOCUMENT UPLOAD (OCR)
     // -------------------------------------
     app.post("/bills/import", verifyFireBaseToken, async (req, res) => {
       const bill = req.body;
