@@ -5,11 +5,13 @@ Complete backend API for utility bill management system with authentication, CRU
 ## Features
 
 ✅ **Authentication & Authorization**
+
 - JWT-based authentication
 - Role-based access control (User & Admin)
 - Password hashing with bcrypt
 
 ✅ **Full CRUD Operations**
+
 - Providers management
 - Bills management
 - User bills tracking
@@ -18,12 +20,14 @@ Complete backend API for utility bill management system with authentication, CRU
 - Reviews & ratings
 
 ✅ **Advanced Features**
+
 - Search, filter, sort, pagination
 - Dashboard analytics with charts data
 - AI chat assistant (Groq)
 - Email notifications (SMTP)
 
 ✅ **Database**
+
 - MongoDB with 8 collections
 - No hardcoded seed data - all via APIs
 
@@ -65,18 +69,21 @@ SMTP_PASS=your_app_password
 ## API Endpoints Summary
 
 ### Authentication (No Auth Required)
+
 ```
 POST   /auth/register          - Register new user
 POST   /auth/login             - Login user
 ```
 
 ### User Profile (Auth Required)
+
 ```
 GET    /users/profile          - Get user profile
 PUT    /users/profile          - Update profile
 ```
 
 ### Providers (Admin for POST/PUT/DELETE)
+
 ```
 GET    /providers              - Get all providers (search, filter, paginate)
 GET    /providers/:id          - Get single provider
@@ -86,6 +93,7 @@ DELETE /providers/:id          - Delete provider (Admin)
 ```
 
 ### Bills - Public Templates (Admin for POST/PUT/DELETE)
+
 ```
 GET    /bills                  - Get all bills (search, filter, paginate)
 GET    /bills/:id              - Get single bill
@@ -95,6 +103,7 @@ DELETE /bills/:id              - Delete bill (Admin)
 ```
 
 ### My Bills - User's Personal Bills (Auth Required)
+
 ```
 GET    /mybills                - Get user's bills (search, filter, paginate)
 POST   /mybills                - Create user bill
@@ -103,24 +112,28 @@ DELETE /mybills/:id            - Delete user bill
 ```
 
 ### Subscriptions
+
 ```
 GET    /subscriptions          - Get subscriptions
 POST   /subscriptions          - Create subscription
 ```
 
 ### Payments
+
 ```
 GET    /payments               - Get payments
 POST   /payments/complete      - Record payment (sends email invoice)
 ```
 
 ### Dashboard Analytics (Auth Required)
+
 ```
 GET    /dashboard/stats        - User dashboard stats (charts data)
 GET    /dashboard/admin/stats  - Admin dashboard stats (Admin only)
 ```
 
 ### Reviews & Ratings
+
 ```
 GET    /reviews                - Get reviews for provider
 POST   /reviews                - Create review (Auth)
@@ -128,6 +141,7 @@ DELETE /reviews/:id            - Delete review (Auth - own or admin)
 ```
 
 ### AI Features
+
 ```
 POST   /ai/chat                - Chat with AI assistant
 POST   /ai/insights            - Get AI spending insights
@@ -152,8 +166,8 @@ After server is running, register a user normally, then manually update the role
 // In MongoDB Shell or Compass
 db.users.updateOne(
   { email: "admin@smartbills.com" },
-  { $set: { role: "admin" } }
-)
+  { $set: { role: "admin" } },
+);
 ```
 
 Or use MongoDB Compass to change role from "user" to "admin".
@@ -186,6 +200,7 @@ curl http://localhost:3001/providers?page=1&limit=10
 ### Using Postman or Thunder Client
 
 Import these common requests:
+
 1. Set `Authorization` header: `Bearer <token>`
 2. Set `Content-Type` header: `application/json`
 3. Use JSON body for POST/PUT requests
@@ -207,9 +222,11 @@ Import these common requests:
 ## Production Deployment
 
 ### For Vercel:
+
 Already configured with `vercel.json`. Just push to GitHub and connect to Vercel.
 
 ### Environment Variables on Vercel:
+
 Add all `.env` variables in Vercel dashboard under Settings > Environment Variables.
 
 ## Security Notes
