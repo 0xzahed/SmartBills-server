@@ -4,6 +4,8 @@
 const path = require("path");
 const dotenv = require("dotenv");
 const nodemailer = require("nodemailer");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 // Load env vars from repo root (default) and ensure server/.env also applies
 dotenv.config();
@@ -28,11 +30,13 @@ const {
   SMTP_USER,
   SMTP_PASS,
   SMTP_FROM,
+  JWT_SECRET = "your-secret-key-change-in-production",
+  JWT_EXPIRES_IN = "7d",
 } = process.env;
 
 if (!DB_USER || !DB_PASS || !DB_CLUSTER) {
   console.warn(
-    "Missing one or more MongoDB env variables (DB_USER, DB_PASS, DB_CLUSTER). Ensure they are set before starting the server."
+    "Missing one or more MongoDB env variables (DB_USER, DB_PASS, DB_CLUSTER). Ensure they are set before starting the server.",
   );
 }
 
@@ -66,7 +70,7 @@ const mailTransporter = emailEnabled
 
 if (!emailEnabled) {
   console.warn(
-    "SMTP email is disabled. Set SMTP_HOST/PORT/USER/PASS to enable invoice emails."
+    "SMTP email is disabled. Set SMTP_HOST/PORT/USER/PASS to enable invoice emails.",
   );
 }
 
@@ -105,7 +109,7 @@ async function sendInvoiceEmail(payload) {
   const summaryRows = Object.entries(paymentSummary)
     .map(
       ([label, value]) =>
-        `<tr><td style="padding:6px 12px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">${label}</td><td style="padding:6px 12px;border:1px solid #e5e7eb;">${value}</td></tr>`
+        `<tr><td style="padding:6px 12px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">${label}</td><td style="padding:6px 12px;border:1px solid #e5e7eb;">${value}</td></tr>`,
     )
     .join("");
 
@@ -137,150 +141,33 @@ app.use(morgan("dev"));
 
 const SYSTEM_PROMPT = `You are SmartBills AI, a proactive bill-management assistant. Keep answers concise (under 120 words) and actionable. Always reference the user's data when available. Offer 3 follow-up suggestions separated by new lines when asked.`;
 
-const providerIds = {
-  electricity: new ObjectId(),
-  gas: new ObjectId(),
-  water: new ObjectId(),
-  internet: new ObjectId(),
-};
-
-const providerSeed = [
-  {
-    _id: providerIds.electricity,
-    name: "Dhaka Electric Supply Co.",
-    type: "Electricity",
-    description:
-      "Reliable residential and commercial electricity service across Dhaka.",
-    pricing: "৳8.25 per KWh (residential average)",
-    coverage: "Dhaka North & East zones",
-    website: "https://www.desco.org.bd",
-    logo: "https://i.ibb.co/M6RJF8N/electric.png",
-    billingType: "Monthly",
-    paymentMethod: "Card, Mobile Wallet, Bank",
-    zone: "Gulshan, Banani, Uttara",
-    lateFeePolicy: "2% after due date",
-    hotline: "+880-9666-222-555",
-    supportEmail: "support@desco.org.bd",
-    address: "House 22/B, Road 12, Nikunja-2, Dhaka",
-    createdAt: new Date(),
-  },
-  {
-    _id: providerIds.gas,
-    name: "Titas Gas Transmission",
-    type: "Gas",
-    description: "Natural gas distribution for households and industries.",
-    pricing: "৳975 per double-burner connection",
-    coverage: "Dhaka, Gazipur, Narayanganj",
-    website: "https://www.titasgas.org.bd",
-    logo: "https://i.ibb.co/mcb3Y7x/gas.png",
-    billingType: "Bi-monthly",
-    paymentMethod: "Bank, Mobile Wallet",
-    zone: "City-wide",
-    lateFeePolicy: "৳50 fixed surcharge",
-    hotline: "+880-9666-777-888",
-    supportEmail: "care@titasgas.com",
-    address: "105 Kazi Nazrul Islam Ave, Dhaka",
-    createdAt: new Date(),
-  },
-  {
-    _id: providerIds.water,
-    name: "DWASA",
-    type: "Water",
-    description: "Dhaka Water Supply & Sewerage Authority services.",
-    pricing: "৳15 per 1000 liters (residential)",
-    coverage: "Dhaka Metro",
-    website: "https://www.dwasa.org.bd",
-    logo: "https://i.ibb.co/Z1fgnYt/water.png",
-    billingType: "Monthly",
-    paymentMethod: "Bank, Mobile Wallet",
-    zone: "All zones",
-    lateFeePolicy: "1.5% monthly",
-    hotline: "+880-9611-666-777",
-    supportEmail: "info@dwasa.org.bd",
-    address: "98 Kazi Nazrul Islam Ave, Dhaka",
-    createdAt: new Date(),
-  },
-  {
-    _id: providerIds.internet,
-    name: "AmberNet Broadband",
-    type: "Internet",
-    description: "High-speed internet for home and SME.",
-    pricing: "৳1,200 for 80 Mbps",
-    coverage: "Dhaka city",
-    website: "https://www.ambernet.com.bd",
-    logo: "https://i.ibb.co/HHzttFJ/internet.png",
-    billingType: "Monthly",
-    paymentMethod: "Card, Mobile Wallet",
-    zone: "Uttara, Mirpur, Dhanmondi",
-    lateFeePolicy: "৳100 reconnect fee",
-    hotline: "+880-9666-888-444",
-    supportEmail: "hello@ambernet.com.bd",
-    address: "32 Lake Circus, Kalabagan, Dhaka",
-    createdAt: new Date(),
-  },
-];
-
-const billSeed = [
-  {
-    title: "DESCO Residential Bill",
-    category: "Electricity",
-    amount: 1450,
-    location: "Banani, Dhaka",
-    date: "2025-11-05",
-    dueDate: "2025-11-15",
-    description: "Monthly electricity usage for 4-person household.",
-    image: "https://i.ibb.co/bNWc5Rf/electric-bill.jpg",
-    providerId: providerIds.electricity,
-    createdAt: new Date(),
-  },
-  {
-    title: "Titas Gas Usage",
-    category: "Gas",
-    amount: 975,
-    location: "Dhanmondi, Dhaka",
-    date: "2025-10-30",
-    dueDate: "2025-11-10",
-    description: "Flat-rate gas bill for residential double burner.",
-    image: "https://i.ibb.co/hmrxW2y/gas-bill.jpg",
-    providerId: providerIds.gas,
-    createdAt: new Date(),
-  },
-  {
-    title: "DWASA Monthly Water Bill",
-    category: "Water",
-    amount: 620,
-    location: "Uttara, Dhaka",
-    date: "2025-11-01",
-    dueDate: "2025-11-12",
-    description: "Water and sewerage usage for apartment block.",
-    image: "https://i.ibb.co/L5rvsHQ/water-bill.jpg",
-    providerId: providerIds.water,
-    createdAt: new Date(),
-  },
-  {
-    title: "AmberNet Broadband Bill",
-    category: "Internet",
-    amount: 1200,
-    location: "Mirpur, Dhaka",
-    date: "2025-11-02",
-    dueDate: "2025-11-07",
-    description: "Monthly broadband subscription (80 Mbps).",
-    image: "https://i.ibb.co/3CF4DzG/internet-bill.jpg",
-    providerId: providerIds.internet,
-    createdAt: new Date(),
-  },
-];
-
 const collections = {};
 let mongoClient;
 
-async function seedCollection(collection, data) {
-  if (!collection) return;
-  const count = await collection.estimatedDocumentCount();
-  if (count === 0 && data.length) {
-    await collection.insertMany(data);
-    console.log(`Seeded ${collection.collectionName} with ${data.length} docs`);
+// Middleware to verify JWT token
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).json({ error: "Access token required" });
   }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: "Invalid or expired token" });
+    }
+    req.user = user;
+    next();
+  });
+}
+
+// Middleware to check admin role
+function authorizeAdmin(req, res, next) {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  next();
 }
 
 async function initDatabase() {
@@ -294,11 +181,8 @@ async function initDatabase() {
   collections.myBills = db.collection("myBills");
   collections.payments = db.collection("payments");
   collections.chatLogs = db.collection("chatLogs");
-
-  await Promise.all([
-    seedCollection(collections.providers, providerSeed),
-    seedCollection(collections.bills, billSeed),
-  ]);
+  collections.users = db.collection("users");
+  collections.reviews = db.collection("reviews");
 
   console.log(`Connected to MongoDB database: ${DB_NAME}`);
 }
@@ -332,7 +216,7 @@ async function buildUserContext(email) {
       (bill) =>
         `${bill.title || bill.username || "Bill"} - ৳${bill.amount} on ${
           bill.date
-        }`
+        }`,
     )
     .join("; ")}\nSubscriptions: ${subscriptions
     .map((sub) => `${sub.providerName || sub.providerId}`)
@@ -367,12 +251,210 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
 });
 
+// ========== AUTHENTICATION ROUTES ==========
+
+app.post("/auth/register", async (req, res) => {
+  try {
+    const { name, email, password, photoURL, role = "user" } = req.body || {};
+
+    if (!name || !email || !password) {
+      return res
+        .status(400)
+        .json({ error: "Name, email, and password are required" });
+    }
+
+    // Check if user already exists
+    const existingUser = await collections.users.findOne({ email });
+    if (existingUser) {
+      return res
+        .status(400)
+        .json({ error: "User already exists with this email" });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create user
+    const user = {
+      name,
+      email,
+      password: hashedPassword,
+      photoURL: photoURL || null,
+      role: role === "admin" ? "user" : role, // Prevent self-assignment of admin
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const result = await collections.users.insertOne(user);
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: result.insertedId, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN },
+    );
+
+    res.status(201).json({
+      success: true,
+      token,
+      user: {
+        _id: result.insertedId,
+        name: user.name,
+        email: user.email,
+        photoURL: user.photoURL,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error("POST /auth/register error", error);
+    res.status(500).json({ error: "Failed to register user" });
+  }
+});
+
+app.post("/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+
+    // Find user
+    const user = await collections.users.findOne({ email });
+    if (!user) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    // Verify password
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN },
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        photoURL: user.photoURL,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error("POST /auth/login error", error);
+    res.status(500).json({ error: "Failed to login" });
+  }
+});
+
+// ========== USER PROFILE ROUTES ==========
+
+app.get("/users/profile", authenticateToken, async (req, res) => {
+  try {
+    const user = await collections.users.findOne(
+      { _id: new ObjectId(req.user.userId) },
+      { projection: { password: 0 } },
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json(user);
+  } catch (error) {
+    console.error("GET /users/profile error", error);
+    res.status(500).json({ error: "Failed to load profile" });
+  }
+});
+
+app.put("/users/profile", authenticateToken, async (req, res) => {
+  try {
+    const { name, photoURL, phone, address, bio } = req.body || {};
+
+    const updates = {
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (name) updates.name = name;
+    if (photoURL !== undefined) updates.photoURL = photoURL;
+    if (phone !== undefined) updates.phone = phone;
+    if (address !== undefined) updates.address = address;
+    if (bio !== undefined) updates.bio = bio;
+
+    await collections.users.updateOne(
+      { _id: new ObjectId(req.user.userId) },
+      { $set: updates },
+    );
+
+    const updatedUser = await collections.users.findOne(
+      { _id: new ObjectId(req.user.userId) },
+      { projection: { password: 0 } },
+    );
+
+    res.json({ success: true, user: updatedUser });
+  } catch (error) {
+    console.error("PUT /users/profile error", error);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+});
+
 app.get("/providers", async (req, res) => {
   try {
-    const { type } = req.query;
-    const filter = type && type !== "All" ? { type } : {};
-    const providers = await collections.providers.find(filter).toArray();
-    res.json(providers);
+    const {
+      type,
+      search,
+      sort = "name",
+      order = "asc",
+      page = "1",
+      limit = "12",
+    } = req.query;
+
+    const filter = {};
+    if (type && type !== "All") filter.type = type;
+
+    // Search functionality
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+        { zone: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const sortOrder = order === "desc" ? -1 : 1;
+    const sortOptions = { [sort]: sortOrder };
+
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+    const skip = (pageNum - 1) * limitNum;
+
+    const [providers, total] = await Promise.all([
+      collections.providers
+        .find(filter)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(limitNum)
+        .toArray(),
+      collections.providers.countDocuments(filter),
+    ]);
+
+    res.json({
+      providers,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
   } catch (error) {
     console.error("GET /providers error", error);
     res.status(500).json({ error: "Failed to load providers" });
@@ -393,15 +475,182 @@ app.get("/providers/:id", async (req, res) => {
   }
 });
 
+app.post("/providers", authenticateToken, authorizeAdmin, async (req, res) => {
+  try {
+    const {
+      name,
+      type,
+      description,
+      pricing,
+      coverage,
+      website,
+      logo,
+      billingType,
+      paymentMethod,
+      zone,
+      lateFeePolicy,
+      hotline,
+      supportEmail,
+      address,
+    } = req.body || {};
+
+    if (!name || !type) {
+      return res.status(400).json({ error: "Name and type are required" });
+    }
+
+    const provider = {
+      name,
+      type,
+      description: description || "",
+      pricing: pricing || "",
+      coverage: coverage || "",
+      website: website || "",
+      logo: logo || "",
+      billingType: billingType || "Monthly",
+      paymentMethod: paymentMethod || "",
+      zone: zone || "",
+      lateFeePolicy: lateFeePolicy || "",
+      hotline: hotline || "",
+      supportEmail: supportEmail || "",
+      address: address || "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const result = await collections.providers.insertOne(provider);
+    res.status(201).json({
+      success: true,
+      provider: { ...provider, _id: result.insertedId },
+    });
+  } catch (error) {
+    console.error("POST /providers error", error);
+    res.status(500).json({ error: "Failed to create provider" });
+  }
+});
+
+app.put(
+  "/providers/:id",
+  authenticateToken,
+  authorizeAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body || {};
+
+      const existing = await collections.providers.findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!existing) {
+        return res.status(404).json({ error: "Provider not found" });
+      }
+
+      const updateDoc = {
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await collections.providers.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updateDoc },
+      );
+
+      const updated = await collections.providers.findOne({
+        _id: new ObjectId(id),
+      });
+
+      res.json({ success: true, provider: updated });
+    } catch (error) {
+      console.error("PUT /providers/:id error", error);
+      res.status(500).json({ error: "Failed to update provider" });
+    }
+  },
+);
+
+app.delete(
+  "/providers/:id",
+  authenticateToken,
+  authorizeAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const existing = await collections.providers.findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!existing) {
+        return res.status(404).json({ error: "Provider not found" });
+      }
+
+      await collections.providers.deleteOne({ _id: new ObjectId(id) });
+      res.json({ success: true, deletedId: id });
+    } catch (error) {
+      console.error("DELETE /providers/:id error", error);
+      res.status(500).json({ error: "Failed to delete provider" });
+    }
+  },
+);
+
 app.get("/bills", async (req, res) => {
   try {
-    const { category } = req.query;
-    const filter = category ? { category } : {};
-    const bills = await collections.bills
-      .find(filter)
-      .sort({ createdAt: -1 })
-      .toArray();
-    res.json(bills);
+    const {
+      category,
+      search,
+      minAmount,
+      maxAmount,
+      location,
+      sort = "date",
+      order = "desc",
+      page = "1",
+      limit = "12",
+    } = req.query;
+
+    const filter = {};
+    if (category) filter.category = category;
+    if (location) filter.location = { $regex: location, $options: "i" };
+
+    // Search functionality
+    if (search) {
+      filter.$or = [
+        { title: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Price range filter
+    if (minAmount || maxAmount) {
+      filter.amount = {};
+      if (minAmount) filter.amount.$gte = Number(minAmount);
+      if (maxAmount) filter.amount.$lte = Number(maxAmount);
+    }
+
+    const sortOrder = order === "desc" ? -1 : 1;
+    const sortOptions = { [sort]: sortOrder };
+
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+    const skip = (pageNum - 1) * limitNum;
+
+    const [bills, total] = await Promise.all([
+      collections.bills
+        .find(filter)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(limitNum)
+        .toArray(),
+      collections.bills.countDocuments(filter),
+    ]);
+
+    res.json({
+      bills,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
   } catch (error) {
     console.error("GET /bills error", error);
     res.status(500).json({ error: "Failed to load bills" });
@@ -419,6 +668,114 @@ app.get("/bills/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to load bill details" });
   }
 });
+
+app.post("/bills", authenticateToken, authorizeAdmin, async (req, res) => {
+  try {
+    const {
+      title,
+      category,
+      amount,
+      location,
+      date,
+      dueDate,
+      description,
+      image,
+      providerId,
+    } = req.body || {};
+
+    if (!title || !category || !amount) {
+      return res
+        .status(400)
+        .json({ error: "Title, category, and amount are required" });
+    }
+
+    const bill = {
+      title,
+      category,
+      amount: Number(amount),
+      location: location || "",
+      date: date || new Date().toISOString().split("T")[0],
+      dueDate: dueDate || "",
+      description: description || "",
+      image: image || "",
+      providerId: providerId || null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const result = await collections.bills.insertOne(bill);
+    res.status(201).json({
+      success: true,
+      bill: { ...bill, _id: result.insertedId },
+    });
+  } catch (error) {
+    console.error("POST /bills error", error);
+    res.status(500).json({ error: "Failed to create bill" });
+  }
+});
+
+app.put("/bills/:id", authenticateToken, authorizeAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body || {};
+
+    const existing = await collections.bills.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: "Bill not found" });
+    }
+
+    if (updates.amount) {
+      updates.amount = Number(updates.amount);
+    }
+
+    const updateDoc = {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await collections.bills.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateDoc },
+    );
+
+    const updated = await collections.bills.findOne({
+      _id: new ObjectId(id),
+    });
+
+    res.json({ success: true, bill: updated });
+  } catch (error) {
+    console.error("PUT /bills/:id error", error);
+    res.status(500).json({ error: "Failed to update bill" });
+  }
+});
+
+app.delete(
+  "/bills/:id",
+  authenticateToken,
+  authorizeAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const existing = await collections.bills.findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!existing) {
+        return res.status(404).json({ error: "Bill not found" });
+      }
+
+      await collections.bills.deleteOne({ _id: new ObjectId(id) });
+      res.json({ success: true, deletedId: id });
+    } catch (error) {
+      console.error("DELETE /bills/:id error", error);
+      res.status(500).json({ error: "Failed to delete bill" });
+    }
+  },
+);
 
 app.get("/bills/recent", async (req, res) => {
   try {
@@ -502,15 +859,62 @@ app.post("/subscriptions", async (req, res) => {
   }
 });
 
-app.get("/mybills", async (req, res) => {
+app.get("/mybills", authenticateToken, async (req, res) => {
   try {
-    const email = req.query.email || req.headers["x-user-email"];
-    const filter = email ? { email } : {};
-    const bills = await collections.myBills
-      .find(filter)
-      .sort({ date: -1 })
-      .toArray();
-    res.json(bills);
+    const {
+      search,
+      category,
+      minAmount,
+      maxAmount,
+      sort = "date",
+      order = "desc",
+      page = "1",
+      limit = "10",
+    } = req.query;
+
+    const filter = { email: req.user.email };
+
+    if (category) filter.category = category;
+
+    if (search) {
+      filter.$or = [
+        { title: { $regex: search, $options: "i" } },
+        { username: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    if (minAmount || maxAmount) {
+      filter.amount = {};
+      if (minAmount) filter.amount.$gte = Number(minAmount);
+      if (maxAmount) filter.amount.$lte = Number(maxAmount);
+    }
+
+    const sortOrder = order === "desc" ? -1 : 1;
+    const sortOptions = { [sort]: sortOrder };
+
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+    const skip = (pageNum - 1) * limitNum;
+
+    const [bills, total] = await Promise.all([
+      collections.myBills
+        .find(filter)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(limitNum)
+        .toArray(),
+      collections.myBills.countDocuments(filter),
+    ]);
+
+    res.json({
+      bills,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
   } catch (error) {
     console.error("GET /mybills error", error);
     res.status(500).json({ error: "Failed to load bills" });
@@ -538,15 +942,10 @@ app.get("/payments", async (req, res) => {
   }
 });
 
-app.post("/mybills", async (req, res) => {
+app.post("/mybills", authenticateToken, async (req, res) => {
   try {
     const payload = req.body || {};
-    const email = req.headers["x-user-email"] || payload.email;
-    if (!email) {
-      return res
-        .status(400)
-        .json({ error: "Missing email (header x-user-email or body.email)." });
-    }
+    const email = req.user.email;
 
     const doc = {
       ...payload,
@@ -567,16 +966,11 @@ app.post("/mybills", async (req, res) => {
   }
 });
 
-app.put("/mybills/:id", async (req, res) => {
+app.put("/mybills/:id", authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body || {};
-    const email = req.headers["x-user-email"] || updates.email;
-    if (!email) {
-      return res
-        .status(400)
-        .json({ error: "Missing email (header x-user-email or body.email)." });
-    }
+    const email = req.user.email;
 
     const existing = await collections.myBills.findOne({
       _id: new ObjectId(id),
@@ -594,7 +988,7 @@ app.put("/mybills/:id", async (req, res) => {
 
     await collections.myBills.updateOne(
       { _id: new ObjectId(id) },
-      { $set: updateDoc }
+      { $set: updateDoc },
     );
     const refreshed = await collections.myBills.findOne({
       _id: new ObjectId(id),
@@ -606,15 +1000,10 @@ app.put("/mybills/:id", async (req, res) => {
   }
 });
 
-app.delete("/mybills/:id", async (req, res) => {
+app.delete("/mybills/:id", authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const email = req.headers["x-user-email"] || (req.body && req.body.email);
-    if (!email) {
-      return res
-        .status(400)
-        .json({ error: "Missing email (header x-user-email or body.email)." });
-    }
+    const email = req.user.email;
 
     const existing = await collections.myBills.findOne({
       _id: new ObjectId(id),
@@ -741,6 +1130,252 @@ app.post("/ai/chat", async (req, res) => {
   }
 });
 
+// ========== DASHBOARD ANALYTICS ROUTES ==========
+
+app.get("/dashboard/stats", authenticateToken, async (req, res) => {
+  try {
+    const email = req.user.email;
+
+    const [totalBills, totalPayments, totalSubscriptions, recentBills] =
+      await Promise.all([
+        collections.myBills.countDocuments({ email }),
+        collections.payments.countDocuments({ email }),
+        collections.subscriptions.countDocuments({ email }),
+        collections.myBills
+          .find({ email })
+          .sort({ date: -1 })
+          .limit(5)
+          .toArray(),
+      ]);
+
+    const totalSpent = await collections.myBills
+      .aggregate([
+        { $match: { email } },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
+      ])
+      .toArray();
+
+    const categoryStats = await collections.myBills
+      .aggregate([
+        { $match: { email } },
+        {
+          $group: {
+            _id: "$category",
+            total: { $sum: "$amount" },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { total: -1 } },
+      ])
+      .toArray();
+
+    const monthlyStats = await collections.myBills
+      .aggregate([
+        { $match: { email } },
+        {
+          $group: {
+            _id: { $substr: ["$date", 0, 7] },
+            total: { $sum: "$amount" },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: -1 } },
+        { $limit: 12 },
+      ])
+      .toArray();
+
+    res.json({
+      overview: {
+        totalBills,
+        totalPayments,
+        totalSubscriptions,
+        totalSpent: totalSpent[0]?.total || 0,
+      },
+      categoryStats,
+      monthlyStats: monthlyStats.reverse(),
+      recentBills,
+    });
+  } catch (error) {
+    console.error("GET /dashboard/stats error", error);
+    res.status(500).json({ error: "Failed to load dashboard stats" });
+  }
+});
+
+app.get(
+  "/dashboard/admin/stats",
+  authenticateToken,
+  authorizeAdmin,
+  async (req, res) => {
+    try {
+      const [totalUsers, totalBills, totalPayments, totalProviders] =
+        await Promise.all([
+          collections.users.countDocuments(),
+          collections.myBills.countDocuments(),
+          collections.payments.countDocuments(),
+          collections.providers.countDocuments(),
+        ]);
+
+      const totalRevenue = await collections.payments
+        .aggregate([
+          { $match: { status: "completed" } },
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ])
+        .toArray();
+
+      const recentUsers = await collections.users
+        .find()
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .project({ password: 0 })
+        .toArray();
+
+      const categoryDistribution = await collections.myBills
+        .aggregate([
+          {
+            $group: {
+              _id: "$category",
+              total: { $sum: "$amount" },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { total: -1 } },
+        ])
+        .toArray();
+
+      const monthlyRevenue = await collections.payments
+        .aggregate([
+          { $match: { status: "completed" } },
+          {
+            $group: {
+              _id: { $substr: ["$paymentDate", 0, 7] },
+              total: { $sum: "$amount" },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { _id: -1 } },
+          { $limit: 12 },
+        ])
+        .toArray();
+
+      res.json({
+        overview: {
+          totalUsers,
+          totalBills,
+          totalPayments,
+          totalProviders,
+          totalRevenue: totalRevenue[0]?.total || 0,
+        },
+        categoryDistribution,
+        monthlyRevenue: monthlyRevenue.reverse(),
+        recentUsers,
+      });
+    } catch (error) {
+      console.error("GET /dashboard/admin/stats error", error);
+      res.status(500).json({ error: "Failed to load admin stats" });
+    }
+  },
+);
+
+// ========== REVIEWS AND RATINGS ROUTES ==========
+
+app.get("/reviews", async (req, res) => {
+  try {
+    const { providerId } = req.query;
+
+    if (!providerId) {
+      return res.status(400).json({ error: "providerId is required" });
+    }
+
+    const reviews = await collections.reviews
+      .find({ providerId })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    const avgRating = reviews.length
+      ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+      : 0;
+
+    res.json({
+      reviews,
+      summary: {
+        totalReviews: reviews.length,
+        averageRating: avgRating.toFixed(1),
+      },
+    });
+  } catch (error) {
+    console.error("GET /reviews error", error);
+    res.status(500).json({ error: "Failed to load reviews" });
+  }
+});
+
+app.post("/reviews", authenticateToken, async (req, res) => {
+  try {
+    const { providerId, rating, comment } = req.body || {};
+
+    if (!providerId || !rating) {
+      return res
+        .status(400)
+        .json({ error: "providerId and rating are required" });
+    }
+
+    if (rating < 1 || rating > 5) {
+      return res.status(400).json({ error: "Rating must be between 1 and 5" });
+    }
+
+    const user = await collections.users.findOne(
+      { _id: new ObjectId(req.user.userId) },
+      { projection: { name: 1, photoURL: 1 } },
+    );
+
+    const review = {
+      providerId,
+      userId: req.user.userId,
+      userName: user?.name || "Anonymous",
+      userPhoto: user?.photoURL || null,
+      rating: Number(rating),
+      comment: comment || "",
+      createdAt: new Date().toISOString(),
+    };
+
+    const result = await collections.reviews.insertOne(review);
+
+    res.status(201).json({
+      success: true,
+      review: { ...review, _id: result.insertedId },
+    });
+  } catch (error) {
+    console.error("POST /reviews error", error);
+    res.status(500).json({ error: "Failed to create review" });
+  }
+});
+
+app.delete("/reviews/:id", authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const review = await collections.reviews.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!review) {
+      return res.status(404).json({ error: "Review not found" });
+    }
+
+    if (review.userId !== req.user.userId && req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ error: "Not authorized to delete this review" });
+    }
+
+    await collections.reviews.deleteOne({ _id: new ObjectId(id) });
+
+    res.json({ success: true, deletedId: id });
+  } catch (error) {
+    console.error("DELETE /reviews/:id error", error);
+    res.status(500).json({ error: "Failed to delete review" });
+  }
+});
+
 app.post("/ai/insights", async (req, res) => {
   try {
     const { email, timeframe = "90" } = req.body || {};
@@ -750,7 +1385,7 @@ app.post("/ai/insights", async (req, res) => {
 
     const totalSpent = scoped.reduce(
       (sum, bill) => sum + (Number(bill.amount) || 0),
-      0
+      0,
     );
     const grouped = scoped.reduce((acc, bill) => {
       const key = bill.category || bill.title || "General";
@@ -761,7 +1396,7 @@ app.post("/ai/insights", async (req, res) => {
     const recentPayments = [...scoped]
       .sort(
         (a, b) =>
-          new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt)
+          new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt),
       )
       .slice(0, 5);
 
@@ -776,9 +1411,9 @@ app.post("/ai/insights", async (req, res) => {
             {
               role: "user",
               content: `Provide a bullet summary (max 3 bullets) of this spending data: total ৳${totalSpent.toFixed(
-                2
+                2,
               )}, categories ${JSON.stringify(
-                grouped
+                grouped,
               )}, timeframe ${timeframe} days.`,
             },
           ],
