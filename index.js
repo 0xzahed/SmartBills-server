@@ -16,6 +16,7 @@ const cors = require("cors");
 const morgan = require("morgan");
 const { MongoClient, ObjectId } = require("mongodb");
 const Groq = require("groq-sdk");
+const cloudinary = require("cloudinary").v2;
 
 const {
   PORT = 3001,
@@ -32,7 +33,17 @@ const {
   SMTP_FROM,
   JWT_SECRET = "your-secret-key-change-in-production",
   JWT_EXPIRES_IN = "7d",
+  CLOUDINARY_CLOUD_NAME,
+  CLOUDINARY_API_KEY,
+  CLOUDINARY_API_SECRET,
 } = process.env;
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: CLOUDINARY_CLOUD_NAME,
+  api_key: CLOUDINARY_API_KEY || "336239465482777",
+  api_secret: CLOUDINARY_API_SECRET || "sBmpVNgQpyH-Fn_F7GqJOMJVzVo",
+});
 
 if (!DB_USER || !DB_PASS || !DB_CLUSTER) {
   console.warn(
@@ -276,6 +287,32 @@ app.get("/health", (req, res) => {
 
 // ========== AUTHENTICATION ROUTES ==========
 
+// Image upload endpoint
+app.post("/upload/image", authenticateToken, async (req, res) => {
+  try {
+    const { image, folder = "smartbills" } = req.body || {};
+
+    if (!image) {
+      return res.status(400).json({ error: "Image data is required" });
+    }
+
+    // Upload to Cloudinary
+    const result = await cloudinary.uploader.upload(image, {
+      folder: folder,
+      resource_type: "auto",
+    });
+
+    res.json({
+      success: true,
+      url: result.secure_url,
+      publicId: result.public_id,
+    });
+  } catch (error) {
+    console.error("POST /upload/image error", error);
+    res.status(500).json({ error: "Failed to upload image" });
+  }
+});
+
 app.post("/auth/register", async (req, res) => {
   try {
     const {
@@ -287,11 +324,9 @@ app.post("/auth/register", async (req, res) => {
     } = req.body || {};
 
     if (!name || !email || !password || !confirmPassword) {
-      return res
-        .status(400)
-        .json({
-          error: "Name, email, password, and confirm password are required",
-        });
+      return res.status(400).json({
+        error: "Name, email, password, and confirm password are required",
+      });
     }
 
     // Check if passwords match
