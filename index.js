@@ -149,14 +149,23 @@ function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
 
+  console.log("🔐 Auth Header:", authHeader ? "Present" : "Missing");
+  console.log("🎫 Token:", token ? `${token.substring(0, 20)}...` : "Missing");
+  console.log("🔑 JWT_SECRET configured:", JWT_SECRET ? "Yes" : "No");
+
   if (!token) {
+    console.log("❌ No token provided");
     return res.status(401).json({ error: "Access token required" });
   }
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
-      return res.status(403).json({ error: "Invalid or expired token" });
+      console.log("❌ Token verification failed:", err.message);
+      return res
+        .status(403)
+        .json({ error: "Invalid or expired token", details: err.message });
     }
+    console.log("✅ Token verified for user:", user.email);
     req.user = user;
     next();
   });
@@ -255,12 +264,19 @@ app.get("/health", (req, res) => {
 
 app.post("/auth/register", async (req, res) => {
   try {
-    const { name, email, password, photoURL, role = "user" } = req.body || {};
+    const { name, email, password, confirmPassword, role = "user" } = req.body || {};
 
-    if (!name || !email || !password) {
+    if (!name || !email || !password || !confirmPassword) {
       return res
         .status(400)
-        .json({ error: "Name, email, and password are required" });
+        .json({ error: "Name, email, password, and confirm password are required" });
+    }
+
+    // Check if passwords match
+    if (password !== confirmPassword) {
+      return res
+        .status(400)
+        .json({ error: "Passwords do not match" });
     }
 
     // Check if user already exists
@@ -279,8 +295,7 @@ app.post("/auth/register", async (req, res) => {
       name,
       email,
       password: hashedPassword,
-      photoURL: photoURL || null,
-      role: role === "admin" ? "user" : role, // Prevent self-assignment of admin
+      role: role === "admin" ? "user" : role, 
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -301,7 +316,6 @@ app.post("/auth/register", async (req, res) => {
         _id: result.insertedId,
         name: user.name,
         email: user.email,
-        photoURL: user.photoURL,
         role: user.role,
       },
     });
@@ -859,9 +873,10 @@ app.post("/subscriptions", async (req, res) => {
   }
 });
 
-app.get("/mybills", authenticateToken, async (req, res) => {
+app.get("/mybills", async (req, res) => {
   try {
     const {
+      email,
       search,
       category,
       minAmount,
@@ -872,7 +887,11 @@ app.get("/mybills", authenticateToken, async (req, res) => {
       limit = "10",
     } = req.query;
 
-    const filter = { email: req.user.email };
+    if (!email) {
+      return res.status(400).json({ error: "Email parameter is required" });
+    }
+
+    const filter = { email };
 
     if (category) filter.category = category;
 
@@ -942,10 +961,14 @@ app.get("/payments", async (req, res) => {
   }
 });
 
-app.post("/mybills", authenticateToken, async (req, res) => {
+app.post("/mybills", async (req, res) => {
   try {
     const payload = req.body || {};
-    const email = req.user.email;
+    const email = payload.email;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
 
     const doc = {
       ...payload,
@@ -966,11 +989,15 @@ app.post("/mybills", authenticateToken, async (req, res) => {
   }
 });
 
-app.put("/mybills/:id", authenticateToken, async (req, res) => {
+app.put("/mybills/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body || {};
-    const email = req.user.email;
+    const email = updates.email;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
 
     const existing = await collections.myBills.findOne({
       _id: new ObjectId(id),
@@ -1000,10 +1027,16 @@ app.put("/mybills/:id", authenticateToken, async (req, res) => {
   }
 });
 
-app.delete("/mybills/:id", authenticateToken, async (req, res) => {
+app.delete("/mybills/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const email = req.user.email;
+    const { email } = req.query;
+
+    if (!email) {
+      return res
+        .status(400)
+        .json({ error: "Email query parameter is required" });
+    }
 
     const existing = await collections.myBills.findOne({
       _id: new ObjectId(id),
@@ -1132,9 +1165,13 @@ app.post("/ai/chat", async (req, res) => {
 
 // ========== DASHBOARD ANALYTICS ROUTES ==========
 
-app.get("/dashboard/stats", authenticateToken, async (req, res) => {
+app.get("/dashboard/stats", async (req, res) => {
   try {
-    const email = req.user.email;
+    const { email } = req.query;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email parameter is required" });
+    }
 
     const [totalBills, totalPayments, totalSubscriptions, recentBills] =
       await Promise.all([
