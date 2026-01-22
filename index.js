@@ -41,8 +41,8 @@ const {
 // Configure Cloudinary
 cloudinary.config({
   cloud_name: CLOUDINARY_CLOUD_NAME,
-  api_key: CLOUDINARY_API_KEY || "336239465482777",
-  api_secret: CLOUDINARY_API_SECRET || "sBmpVNgQpyH-Fn_F7GqJOMJVzVo",
+  api_key: CLOUDINARY_API_KEY,
+  api_secret: CLOUDINARY_API_SECRET,
 });
 
 if (!DB_USER || !DB_PASS || !DB_CLUSTER) {
@@ -152,6 +152,7 @@ const corsOptions = {
   origin: [
     "http://localhost:5173",
     "http://localhost:5174",
+    "http://localhost:5175",
     "https://utility-bil-management.vercel.app",
   ],
   credentials: true,
@@ -303,9 +304,9 @@ app.post("/upload/image", authenticateToken, async (req, res) => {
     // Check if Cloudinary is configured
     if (!CLOUDINARY_API_KEY && !CLOUDINARY_API_SECRET) {
       console.error("❌ Cloudinary not configured");
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: "Image upload service not configured",
-        details: "Cloudinary credentials missing"
+        details: "Cloudinary credentials missing",
       });
     }
 
@@ -327,10 +328,10 @@ app.post("/upload/image", authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error("❌ POST /upload/image error", error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: "Failed to upload image",
       details: error.message,
-      cloudinaryConfigured: !!(CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET)
+      cloudinaryConfigured: !!(CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET),
     });
   }
 });
