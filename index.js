@@ -138,15 +138,18 @@ const app = express();
 
 // CORS configuration
 const corsOptions = {
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'https://utility-bil-management.vercel.app'],
+  origin: [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "https://utility-bil-management.vercel.app",
+  ],
   credentials: true,
   optionsSuccessStatus: 200,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // Handle preflight requests
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan("dev"));
 
@@ -275,19 +278,25 @@ app.get("/health", (req, res) => {
 
 app.post("/auth/register", async (req, res) => {
   try {
-    const { name, email, password, confirmPassword, role = "user" } = req.body || {};
+    const {
+      name,
+      email,
+      password,
+      confirmPassword,
+      role = "user",
+    } = req.body || {};
 
     if (!name || !email || !password || !confirmPassword) {
       return res
         .status(400)
-        .json({ error: "Name, email, password, and confirm password are required" });
+        .json({
+          error: "Name, email, password, and confirm password are required",
+        });
     }
 
     // Check if passwords match
     if (password !== confirmPassword) {
-      return res
-        .status(400)
-        .json({ error: "Passwords do not match" });
+      return res.status(400).json({ error: "Passwords do not match" });
     }
 
     // Check if user already exists
@@ -306,7 +315,7 @@ app.post("/auth/register", async (req, res) => {
       name,
       email,
       password: hashedPassword,
-      role: role === "admin" ? "user" : role, 
+      role: role === "admin" ? "user" : role,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
