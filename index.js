@@ -292,15 +292,33 @@ app.post("/upload/image", authenticateToken, async (req, res) => {
   try {
     const { image, folder = "smartbills" } = req.body || {};
 
+    console.log("📸 Upload request received");
+    console.log("📸 Image data length:", image ? image.length : 0);
+    console.log("📸 Folder:", folder);
+
     if (!image) {
       return res.status(400).json({ error: "Image data is required" });
     }
+
+    // Check if Cloudinary is configured
+    if (!CLOUDINARY_API_KEY && !CLOUDINARY_API_SECRET) {
+      console.error("❌ Cloudinary not configured");
+      return res.status(500).json({ 
+        error: "Image upload service not configured",
+        details: "Cloudinary credentials missing"
+      });
+    }
+
+    console.log("☁️ Uploading to Cloudinary...");
 
     // Upload to Cloudinary
     const result = await cloudinary.uploader.upload(image, {
       folder: folder,
       resource_type: "auto",
+      timeout: 60000,
     });
+
+    console.log("✅ Upload successful:", result.secure_url);
 
     res.json({
       success: true,
@@ -308,8 +326,12 @@ app.post("/upload/image", authenticateToken, async (req, res) => {
       publicId: result.public_id,
     });
   } catch (error) {
-    console.error("POST /upload/image error", error);
-    res.status(500).json({ error: "Failed to upload image" });
+    console.error("❌ POST /upload/image error", error);
+    res.status(500).json({ 
+      error: "Failed to upload image",
+      details: error.message,
+      cloudinaryConfigured: !!(CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET)
+    });
   }
 });
 
