@@ -426,6 +426,37 @@ app.post("/auth/login", async (req, res) => {
 
 // ========== USER PROFILE ROUTES ==========
 
+app.post("/users/profile", authenticateToken, async (req, res) => {
+  try {
+    const { name, photoURL, phone, address, bio } = req.body || {};
+
+    const updates = {
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (name) updates.name = name;
+    if (photoURL !== undefined) updates.photoURL = photoURL;
+    if (phone !== undefined) updates.phone = phone;
+    if (address !== undefined) updates.address = address;
+    if (bio !== undefined) updates.bio = bio;
+
+    await collections.users.updateOne(
+      { _id: new ObjectId(req.user.userId) },
+      { $set: updates },
+    );
+
+    const updatedUser = await collections.users.findOne(
+      { _id: new ObjectId(req.user.userId) },
+      { projection: { password: 0 } },
+    );
+
+    res.json({ success: true, user: updatedUser });
+  } catch (error) {
+    console.error("POST /users/profile error", error);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+});
+
 app.get("/users/profile", authenticateToken, async (req, res) => {
   try {
     const user = await collections.users.findOne(
